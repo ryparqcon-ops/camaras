@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Multi-Cámaras Casa Austin (15 streams)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- HLS.js para navegadores sin HLS nativo (Chrome, Edge en desktop, etc.) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+  <style>
+    :root{--gap:10px;--bg:#0f1115;--card:#151923;--fg:#e8ecf1}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px;background:#0b0d12;position:sticky;top:0;z-index:5;border-bottom:1px solid #222}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button,select{background:#1b2230;color:var(--fg);border:1px solid #2a3142;border-radius:8px;padding:8px 12px;cursor:pointer}
+    button:hover{background:#20283a}
+    .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--gap);padding:var(--gap)}
+    @media (max-width:1200px){.grid{grid-template-columns:repeat(4,1fr)}}
+    @media (max-width:900px){.grid{grid-template-columns:repeat(3,1fr)}}
+    @media (max-width:640px){.grid{grid-template-columns:repeat(2,1fr)}}
+    .card{position:relative;background:var(--card);border:1px solid #2a3142;border-radius:12px;overflow:hidden}
+    .vid{width:100%;height:100%;aspect-ratio:16/9;background:#000;display:block}
+    .badge{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:999px;font-weight:600;font-size:12px}
+    .over{position:absolute;right:8px;bottom:8px;display:flex;gap:6px}
+    .small{padding:6px 8px;border-radius:8px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.15)}
+    .status{position:absolute;left:8px;bottom:8px;font-size:12px;opacity:.8}
+    footer{padding:10px 16px;color:#9aa4b2}
+  </style>
+</head>
+<body>
+  <header>
+    <div><strong>Casa Austin • 15 cámaras</strong></div>
+    <div class="controls">
+      <button id="testConnection">🔍 Probar Conexión</button>
+      <button id="loadStreams">📡 Cargar Streams</button>
+      <button id="playAll">▶️ Play All</button>
+      <button id="pauseAll">⏸️ Pause All</button>
+      <button id="keepAlive">🔄 Keep Alive</button>
+      <button id="muteAll">🔇 Mute All</button>
+      <button id="unmuteAll">🔊 Unmute All</button>
+    </div>
+  </header>
+
+  <main class="grid" id="grid"></main>
+
+  <footer>
+    <div id="streamStatus">Streams activos: <span id="activeCount">0</span> | En cola: <span id="queueCount">0</span></div>
+    <div><strong>Versión MP4:</strong> Ahora usa streams MP4 directos (más compatible que HLS).</div>
+    <div><strong>Pasos:</strong> 1) "🔍 Probar Conexión" 2) "📡 Cargar Streams" 3) "▶️ Play All" 4) "🔄 Keep Alive" si se pausan</div>
+    <div><strong>Keep Alive:</strong> Si los streams se pausan constantemente, usa "🔄 Keep Alive" para reactivarlos.</div>
+    <div>Tip: los navegadores pueden bloquear el autoplay con audio; por eso los videos inician en <em>muted</em>. Activa audio por tarjeta o "Unmute All".</div>
+  </footer>
+
+  <script>
+    // IDs: 101 → 1501 saltando de 100 en 100 (15 cámaras)
+    const camIds = Array.from({length: 15}, (_, i) => 101 + i * 100);
+
+    const makeUrl = id => `https://video.casaaustin.pe/api/stream.mp4?src=cam${id}`;
+
+    const grid = document.getElementById('grid');
+
+    // Guardamos referencias (video, hls, estado)
+    const players = new Map(); // key: camId -> { video, hls, url }
+    
+    // Configuración para evitar saturación
+    const MAX_CONCURRENT_STREAMS = 6; // Máximo 6 streams simultáneos
+    const STREAM_LOAD_DELAY = 2000; // 2 segundos entre cargas
+    let activeStreams = 0;
+    let streamQueue = [];
+
+    // Función para actualizar el estado de los streams
+    function updateStreamStatus() {
+      const activeCountEl = document.getElementById('activeCount');
+      const queueCountEl = document.getElementById('queueCount');
+      
+      if (activeCountEl) activeCountEl.textContent = activeStreams;
+      if (queueCountEl) queueCountEl.textContent = streamQueue.length;
+    }
+
+    // Función para procesar la cola de streams
+    function processStreamQueue() {
+      updateStreamStatus();
+      
+      if (activeStreams >= MAX_CONCURRENT_STREAMS || streamQueue.length === 0) {
+        return;
+      }
+      
+      const nextStream = streamQueue.shift();
+      if (nextStream) {
+        activeStreams++;
+        const { video, url, camId } = nextStream;
+        
+        try {
+          // Intentar cargar el stream
+          const { hls } = attachStream(video, url, camId);
+          players.set(camId, { video, hls, url });
+        } catch (error) {
+          console.error(`Error cargando cam${camId}:`, error);
+          activeStreams--;
+        }
+        
+        // Programar el siguiente stream
+        setTimeout(() => {
+          activeStreams--;
+          processStreamQueue();
+        }, STREAM_LOAD_DELAY);
+      }
+    }
+
+    function attachStream(video, url, camId) {
+      console.log(`Cargando cam${camId} con URL: ${url}`);
+      
+      // Configurar para streaming continuo
+      video.src = url;
+      video.load(); // Forzar carga del nuevo src
+      
+      // Eventos de video para streaming
+      video.addEventListener('loadstart', () => {
+        console.log(`Cam${camId}: Iniciando carga`);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Conectando...';
+      });
+      
+      video.addEventListener('loadedmetadata', () => {
+        console.log(`Cam${camId}: Metadatos cargados`);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Stream activo';
+      });
+      
+      video.addEventListener('canplay', () => {
+        console.log(`Cam${camId}: Puede reproducir`);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Listo';
+      });
+      
+      video.addEventListener('playing', () => {
+        console.log(`Cam${camId}: Reproduciendo`);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'En vivo';
+      });
+      
+      video.addEventListener('waiting', () => {
+        console.log(`Cam${camId}: Buffering...`);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Buffering...';
+      });
+      
+      video.addEventListener('stalled', () => {
+        console.log(`Cam${camId}: Stream pausado`);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Reconectando...';
+      });
+      
+      video.addEventListener('error', (e) => {
+        console.error(`Cam${camId}: Error de video:`, e);
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Error de conexión';
+        
+        // Reintentar conexión después de 5 segundos
+        setTimeout(() => {
+          console.log(`Cam${camId}: Reintentando conexión...`);
+          video.src = url;
+          video.load();
+        }, 5000);
+      });
+      
+      // Mantener el stream activo
+      video.addEventListener('ended', () => {
+        console.log(`Cam${camId}: Stream terminado, reiniciando...`);
+        video.currentTime = 0;
+        video.play().catch(e => console.warn(`Error reiniciando cam${camId}:`, e));
+      });
+      
+      return {hls: null}; // No usamos HLS para MP4
+    }
+
+    function createCard(camId) {
+      const url = makeUrl(camId);
+
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const badge = document.createElement('div');
+      badge.className = 'badge';
+      badge.textContent = `cam${camId}`;
+      card.appendChild(badge);
+
+      const video = document.createElement('video');
+      video.className = 'vid';
+      video.setAttribute('playsinline', '');
+      video.muted = true;         // autoplay friendly
+      video.autoplay = false;      // NO autoplay - solo cargar
+      video.controls = false;
+      video.loop = true; // Para mantener el stream activo
+      video.preload = 'auto'; // Precargar el stream
+      card.appendChild(video);
+
+      const status = document.createElement('div');
+      status.className = 'status';
+      status.id = `status-${camId}`;
+      status.textContent = 'Cargando...';
+      card.appendChild(status);
+
+      const over = document.createElement('div');
+      over.className = 'over';
+
+      const btnPlay = document.createElement('button');
+      btnPlay.className = 'small';
+      btnPlay.title = 'Play/Pause';
+      btnPlay.textContent = '⏯️';
+      btnPlay.onclick = async () => {
+        if (video.paused) { try { await video.play(); } catch(e){ console.warn(e); } }
+        else video.pause();
+      };
+      over.appendChild(btnPlay);
+
+      const btnMute = document.createElement('button');
+      btnMute.className = 'small';
+      btnMute.title = 'Mute/Unmute';
+      btnMute.textContent = '🔈';
+      btnMute.onclick = () => {
+        video.muted = !video.muted;
+        btnMute.textContent = video.muted ? '🔈' : '🔊';
+      };
+      over.appendChild(btnMute);
+
+      const btnFS = document.createElement('button');
+      btnFS.className = 'small';
+      btnFS.title = 'Full Screen';
+      btnFS.textContent = '⛶';
+      btnFS.onclick = () => {
+        if (card.requestFullscreen) card.requestFullscreen();
+        else if (video.requestFullscreen) video.requestFullscreen();
+      };
+      over.appendChild(btnFS);
+
+      card.appendChild(over);
+
+      video.addEventListener('playing', () => { status.textContent = 'En vivo'; });
+      video.addEventListener('pause',   () => { status.textContent = 'Pausado'; });
+      video.addEventListener('waiting', () => { status.textContent = 'Buffering…'; });
+      video.addEventListener('error',   () => { status.textContent = 'Error de reproducción'; });
+
+      // Lazy-init al entrar en viewport con sistema de cola
+      const obs = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting && !players.has(camId)) {
+            // Agregar a la cola en lugar de cargar inmediatamente
+            streamQueue.push({ video, url, camId });
+            setTimeout(() => processStreamQueue(), 100);
+            obs.disconnect();
+          }
+        });
+      }, { threshold: 0.1 });
+      obs.observe(card);
+
+      return card;
+    }
+
+    // Renderizar 15 tarjetas
+    try {
+      camIds.forEach(id => grid.appendChild(createCard(id)));
+    } catch (error) {
+      console.error('Error creando tarjetas:', error);
+    }
+
+    // Controles globales
+    try {
+      const testConnectionBtn = document.getElementById('testConnection');
+      const loadStreamsBtn = document.getElementById('loadStreams');
+      const playAllBtn = document.getElementById('playAll');
+      const pauseAllBtn = document.getElementById('pauseAll');
+      const keepAliveBtn = document.getElementById('keepAlive');
+      const muteAllBtn = document.getElementById('muteAll');
+      const unmuteAllBtn = document.getElementById('unmuteAll');
+      
+      // Probar conexión al servidor
+      testConnectionBtn.onclick = async () => {
+        testConnectionBtn.textContent = '⏳ Probando...';
+        testConnectionBtn.disabled = true;
+        
+        try {
+          // Probar con la primera cámara
+          const testUrl = makeUrl(camIds[0]);
+          const response = await fetch(testUrl, { 
+            method: 'HEAD',
+            mode: 'no-cors' // Para evitar problemas de CORS
+          });
+          
+          testConnectionBtn.textContent = '✅ Conexión OK';
+          console.log('Conexión al servidor exitosa');
+        } catch (error) {
+          testConnectionBtn.textContent = '❌ Sin conexión';
+          console.error('Error de conexión:', error);
+        }
+        
+        setTimeout(() => {
+          testConnectionBtn.textContent = '🔍 Probar Conexión';
+          testConnectionBtn.disabled = false;
+        }, 3000);
+      };
+    
+    // Cargar streams manualmente
+    loadStreamsBtn.onclick = () => {
+      // Cargar todos los streams visibles
+      const visibleCards = document.querySelectorAll('.card');
+      visibleCards.forEach((card, index) => {
+        const video = card.querySelector('video');
+        const camId = camIds[index];
+        const url = makeUrl(camId);
+        
+        if (!players.has(camId)) {
+          streamQueue.push({ video, url, camId });
+        }
+      });
+      processStreamQueue();
+      loadStreamsBtn.textContent = '⏳ Cargando...';
+      loadStreamsBtn.disabled = true;
+      
+      // Habilitar botón después de un tiempo
+      setTimeout(() => {
+        loadStreamsBtn.textContent = '📡 Cargar Streams';
+        loadStreamsBtn.disabled = false;
+      }, 10000);
+    };
+
+    playAllBtn.onclick = async () => {
+      await Promise.all([...players.values()].map(async p => {
+        try { await p.video.play(); } catch(e){ /* ignore */ }
+      }));
+    };
+    pauseAllBtn.onclick = () => {
+      players.forEach(p => p.video.pause());
+    };
+    muteAllBtn.onclick = () => {
+      players.forEach(p => p.video.muted = true);
+    };
+    unmuteAllBtn.onclick = () => {
+      players.forEach(p => p.video.muted = false);
+    };
+
+    // Keep Alive - Mantener streams activos
+    keepAliveBtn.onclick = () => {
+      console.log('Activando keep-alive para todos los streams...');
+      players.forEach(({video, url}, camId) => {
+        if (video.readyState >= 2) {
+          // Reiniciar el stream para mantenerlo activo
+          video.src = url;
+          video.load();
+          video.play().catch(e => console.warn(`Error en keep-alive cam${camId}:`, e));
+        }
+      });
+      keepAliveBtn.textContent = '✅ Keep Alive OK';
+      setTimeout(() => {
+        keepAliveBtn.textContent = '🔄 Keep Alive';
+      }, 3000);
+    };
+
+    // Los controles de calidad no son necesarios para MP4 directo
+    } catch (error) {
+      console.error('Error en controles:', error);
+    }
+
+    // Actualizar estado cada 2 segundos
+    setInterval(updateStreamStatus, 2000);
+    
+    // Sistema de keep-alive para streams
+    setInterval(() => {
+      players.forEach(({video}, camId) => {
+        if (video.paused && video.readyState >= 2) {
+          console.log(`Cam${camId}: Stream pausado, reactivando...`);
+          video.play().catch(e => console.warn(`Error reactivando cam${camId}:`, e));
+        }
+      });
+    }, 10000); // Cada 10 segundos
+    
+    // Limpieza al cerrar pestaña
+    window.addEventListener('beforeunload', () => {
+      players.forEach(({hls, video}) => {
+        try { video.pause(); } catch(e){}
+        if (hls && hls.destroy) hls.destroy();
+      });
+    });
+  </script>
+</body>
+</html>
