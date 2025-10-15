@@ -35,6 +35,7 @@
       <button id="loadStreams">📡 Cargar Streams</button>
       <button id="playAll">▶️ Play All</button>
       <button id="pauseAll">⏸️ Pause All</button>
+      <button id="stopAll">⏹️ Stop All</button>
       <button id="keepAlive">🔄 Keep Alive</button>
       <button id="muteAll">🔇 Mute All</button>
       <button id="unmuteAll">🔊 Unmute All</button>
@@ -45,9 +46,9 @@
 
   <footer>
     <div id="streamStatus">Streams activos: <span id="activeCount">0</span> | En cola: <span id="queueCount">0</span></div>
-    <div><strong>Versión MP4:</strong> Ahora usa streams MP4 directos (más compatible que HLS).</div>
+    <div><strong>Modo Manual:</strong> Los streams están APAGADOS por defecto. Solo se cargan cuando tú lo solicites.</div>
     <div><strong>Pasos:</strong> 1) "🔍 Probar Conexión" 2) "📡 Cargar Streams" 3) "▶️ Play All" 4) "🔄 Keep Alive" si se pausan</div>
-    <div><strong>Keep Alive:</strong> Si los streams se pausan constantemente, usa "🔄 Keep Alive" para reactivarlos.</div>
+    <div><strong>Control Total:</strong> Tú decides cuándo cargar y reproducir los streams. Sin carga automática.</div>
     <div>Tip: los navegadores pueden bloquear el autoplay con audio; por eso los videos inician en <em>muted</em>. Activa audio por tarjeta o "Unmute All".</div>
   </footer>
 
@@ -198,7 +199,7 @@
       const status = document.createElement('div');
       status.className = 'status';
       status.id = `status-${camId}`;
-      status.textContent = 'Cargando...';
+      status.textContent = 'Apagado';
       card.appendChild(status);
 
       const over = document.createElement('div');
@@ -241,18 +242,8 @@
       video.addEventListener('waiting', () => { status.textContent = 'Buffering…'; });
       video.addEventListener('error',   () => { status.textContent = 'Error de reproducción'; });
 
-      // Lazy-init al entrar en viewport con sistema de cola
-      const obs = new IntersectionObserver(entries => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting && !players.has(camId)) {
-            // Agregar a la cola en lugar de cargar inmediatamente
-            streamQueue.push({ video, url, camId });
-            setTimeout(() => processStreamQueue(), 100);
-            obs.disconnect();
-          }
-        });
-      }, { threshold: 0.1 });
-      obs.observe(card);
+      // NO cargar automáticamente - solo cuando se solicite manualmente
+      // Los streams se cargarán únicamente con el botón "📡 Cargar Streams"
 
       return card;
     }
@@ -270,6 +261,7 @@
       const loadStreamsBtn = document.getElementById('loadStreams');
       const playAllBtn = document.getElementById('playAll');
       const pauseAllBtn = document.getElementById('pauseAll');
+      const stopAllBtn = document.getElementById('stopAll');
       const keepAliveBtn = document.getElementById('keepAlive');
       const muteAllBtn = document.getElementById('muteAll');
       const unmuteAllBtn = document.getElementById('unmuteAll');
@@ -302,6 +294,8 @@
     
     // Cargar streams manualmente
     loadStreamsBtn.onclick = () => {
+      console.log('Iniciando carga manual de streams...');
+      
       // Cargar todos los streams visibles
       const visibleCards = document.querySelectorAll('.card');
       visibleCards.forEach((card, index) => {
@@ -313,6 +307,7 @@
           streamQueue.push({ video, url, camId });
         }
       });
+      
       processStreamQueue();
       loadStreamsBtn.textContent = '⏳ Cargando...';
       loadStreamsBtn.disabled = true;
@@ -321,7 +316,7 @@
       setTimeout(() => {
         loadStreamsBtn.textContent = '📡 Cargar Streams';
         loadStreamsBtn.disabled = false;
-      }, 10000);
+      }, 15000); // Más tiempo para la carga
     };
 
     playAllBtn.onclick = async () => {
@@ -332,6 +327,29 @@
     pauseAllBtn.onclick = () => {
       players.forEach(p => p.video.pause());
     };
+    
+    // Stop All - Apagar todos los streams
+    stopAllBtn.onclick = () => {
+      console.log('Apagando todos los streams...');
+      players.forEach(({video}, camId) => {
+        video.pause();
+        video.src = '';
+        video.load();
+        const status = document.querySelector(`#status-${camId}`);
+        if (status) status.textContent = 'Apagado';
+      });
+      
+      // Limpiar la cola de streams
+      streamQueue.length = 0;
+      activeStreams = 0;
+      updateStreamStatus();
+      
+      stopAllBtn.textContent = '✅ Apagados';
+      setTimeout(() => {
+        stopAllBtn.textContent = '⏹️ Stop All';
+      }, 2000);
+    };
+    
     muteAllBtn.onclick = () => {
       players.forEach(p => p.video.muted = true);
     };
