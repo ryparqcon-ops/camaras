@@ -271,12 +271,40 @@
 
       const btnFS = document.createElement('button');
       btnFS.className = 'small';
-      btnFS.title = 'Full Screen';
+      btnFS.title = 'Full Screen Toggle';
       btnFS.textContent = '⛶';
-      btnFS.onclick = () => {
-        if (card.requestFullscreen) card.requestFullscreen();
-        else if (video.requestFullscreen) video.requestFullscreen();
+      btnFS.onclick = async () => {
+        try {
+          if (!document.fullscreenElement) {
+            // Entrar a fullscreen
+            if (card.requestFullscreen) {
+              await card.requestFullscreen();
+            } else if (video.requestFullscreen) {
+              await video.requestFullscreen();
+            }
+            btnFS.textContent = '⛶';
+            btnFS.title = 'Salir Full Screen';
+            btnFS.style.background = 'rgba(255, 0, 0, 0.7)'; // Rojo cuando está en fullscreen
+          } else {
+            // Salir de fullscreen
+            await document.exitFullscreen();
+            btnFS.textContent = '⛶';
+            btnFS.title = 'Full Screen';
+            btnFS.style.background = 'rgba(0, 0, 0, 0.55)'; // Volver al color original
+          }
+        } catch (error) {
+          console.warn('Error con fullscreen:', error);
+        }
       };
+      
+      // Listener para detectar cuando se sale de fullscreen (Escape)
+      document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) {
+          btnFS.textContent = '⛶';
+          btnFS.title = 'Full Screen';
+          btnFS.style.background = 'rgba(0, 0, 0, 0.55)'; // Volver al color original
+        }
+      });
       over.appendChild(btnFS);
 
       card.appendChild(over);
