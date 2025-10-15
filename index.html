@@ -32,7 +32,8 @@
     <div><strong>Casa Austin • 15 cámaras</strong></div>
     <div class="controls">
       <button id="testConnection">🔍 Probar Conexión</button>
-      <button id="loadStreams">📡 Cargar Streams</button>
+      <button id="loadStreams">📡 Cargar 6 Streams</button>
+      <button id="loadMoreStreams">📡+ Cargar Más</button>
       <button id="playAll">▶️ Play All</button>
       <button id="pauseAll">⏸️ Pause All</button>
       <button id="stopAll">⏹️ Stop All</button>
@@ -47,8 +48,9 @@
   <footer>
     <div id="streamStatus">Streams activos: <span id="activeCount">0</span> | En cola: <span id="queueCount">0</span></div>
     <div><strong>Modo Manual:</strong> Los streams están APAGADOS por defecto. Solo se cargan cuando tú lo solicites.</div>
-    <div><strong>Pasos:</strong> 1) "🔍 Probar Conexión" 2) "📡 Cargar Streams" 3) "▶️ Play All" 4) "🔄 Keep Alive" si se pausan</div>
-    <div><strong>Control Total:</strong> Tú decides cuándo cargar y reproducir los streams. Sin carga automática.</div>
+    <div><strong>Pasos:</strong> 1) "🔍 Probar Conexión" 2) "📡 Cargar 6 Streams" 3) "📡+ Cargar Más" 4) "▶️ Play All"</div>
+    <div><strong>Control Individual:</strong> Haz clic en ⏯️ de una cámara para cargar y reproducir SOLO esa cámara.</div>
+    <div><strong>Sin Saturación:</strong> Carga máxima de 6 streams a la vez para evitar lag y saturación del servidor.</div>
     <div>Tip: los navegadores pueden bloquear el autoplay con audio; por eso los videos inician en <em>muted</em>. Activa audio por tarjeta o "Unmute All".</div>
   </footer>
 
@@ -215,16 +217,44 @@
         event.preventDefault();
         
         console.log(`Controlando SOLO cam${camId} individualmente`);
-        if (video.paused) { 
-          try { 
-            await video.play(); 
-            console.log(`Cam${camId}: Reproduciendo SOLO esta cámara`);
-          } catch(e){ 
-            console.warn(`Error reproduciendo cam${camId}:`, e); 
-          } 
-        } else { 
-          video.pause(); 
-          console.log(`Cam${camId}: Pausado SOLO esta cámara`);
+        
+        // Si el video no tiene src, cargarlo primero
+        if (!video.src || video.src === '') {
+          console.log(`Cam${camId}: Cargando stream individual...`);
+          const status = document.querySelector(`#status-${camId}`);
+          if (status) status.textContent = 'Cargando...';
+          
+          try {
+            const { hls } = attachStream(video, url, camId);
+            players.set(camId, { video, hls, url });
+            
+            // Esperar a que se cargue antes de reproducir
+            video.addEventListener('canplay', async () => {
+              try {
+                await video.play();
+                console.log(`Cam${camId}: Reproduciendo SOLO esta cámara`);
+              } catch(e) {
+                console.warn(`Error reproduciendo cam${camId}:`, e);
+              }
+            }, { once: true });
+            
+          } catch(e) {
+            console.error(`Error cargando cam${camId}:`, e);
+            if (status) status.textContent = 'Error de carga';
+          }
+        } else {
+          // Si ya tiene src, solo play/pause
+          if (video.paused) { 
+            try { 
+              await video.play(); 
+              console.log(`Cam${camId}: Reproduciendo SOLO esta cámara`);
+            } catch(e){ 
+              console.warn(`Error reproduciendo cam${camId}:`, e); 
+            } 
+          } else { 
+            video.pause(); 
+            console.log(`Cam${camId}: Pausado SOLO esta cámara`);
+          }
         }
       };
       over.appendChild(btnPlay);
@@ -273,6 +303,7 @@
     try {
       const testConnectionBtn = document.getElementById('testConnection');
       const loadStreamsBtn = document.getElementById('loadStreams');
+      const loadMoreStreamsBtn = document.getElementById('loadMoreStreams');
       const playAllBtn = document.getElementById('playAll');
       const pauseAllBtn = document.getElementById('pauseAll');
       const stopAllBtn = document.getElementById('stopAll');
@@ -306,31 +337,64 @@
         }, 3000);
       };
     
-    // Cargar streams manualmente
+    // Cargar streams manualmente (solo las primeras 6 para evitar saturación)
     loadStreamsBtn.onclick = () => {
-      console.log('Iniciando carga manual de streams...');
+      console.log('Iniciando carga manual de streams (máximo 6 para evitar saturación)...');
       
-      // Cargar todos los streams visibles
+      // Cargar solo las primeras 6 cámaras para evitar saturación
+      const maxStreams = 6;
       const visibleCards = document.querySelectorAll('.card');
-      visibleCards.forEach((card, index) => {
+      
+      for (let i = 0; i < Math.min(maxStreams, visibleCards.length); i++) {
+        const card = visibleCards[i];
         const video = card.querySelector('video');
-        const camId = camIds[index];
+        const camId = camIds[i];
         const url = makeUrl(camId);
         
         if (!players.has(camId)) {
           streamQueue.push({ video, url, camId });
         }
-      });
+      }
       
       processStreamQueue();
-      loadStreamsBtn.textContent = '⏳ Cargando...';
+      loadStreamsBtn.textContent = '⏳ Cargando 6 streams...';
       loadStreamsBtn.disabled = true;
       
       // Habilitar botón después de un tiempo
       setTimeout(() => {
         loadStreamsBtn.textContent = '📡 Cargar Streams';
         loadStreamsBtn.disabled = false;
-      }, 15000); // Más tiempo para la carga
+      }, 20000); // Más tiempo para la carga
+    };
+
+    // Cargar más streams (las siguientes 6)
+    loadMoreStreamsBtn.onclick = () => {
+      console.log('Cargando más streams (siguientes 6)...');
+      
+      // Cargar las siguientes 6 cámaras
+      const maxStreams = 6;
+      const visibleCards = document.querySelectorAll('.card');
+      const startIndex = players.size; // Empezar desde donde se quedó
+      
+      for (let i = startIndex; i < Math.min(startIndex + maxStreams, visibleCards.length); i++) {
+        const card = visibleCards[i];
+        const video = card.querySelector('video');
+        const camId = camIds[i];
+        const url = makeUrl(camId);
+        
+        if (!players.has(camId)) {
+          streamQueue.push({ video, url, camId });
+        }
+      }
+      
+      processStreamQueue();
+      loadMoreStreamsBtn.textContent = '⏳ Cargando más...';
+      loadMoreStreamsBtn.disabled = true;
+      
+      setTimeout(() => {
+        loadMoreStreamsBtn.textContent = '📡+ Cargar Más';
+        loadMoreStreamsBtn.disabled = false;
+      }, 20000);
     };
 
     playAllBtn.onclick = async () => {
