@@ -207,11 +207,25 @@
 
       const btnPlay = document.createElement('button');
       btnPlay.className = 'small';
-      btnPlay.title = 'Play/Pause';
+      btnPlay.title = 'Play/Pause Individual';
       btnPlay.textContent = '⏯️';
-      btnPlay.onclick = async () => {
-        if (video.paused) { try { await video.play(); } catch(e){ console.warn(e); } }
-        else video.pause();
+      btnPlay.onclick = async (event) => {
+        // Prevenir propagación del evento
+        event.stopPropagation();
+        event.preventDefault();
+        
+        console.log(`Controlando SOLO cam${camId} individualmente`);
+        if (video.paused) { 
+          try { 
+            await video.play(); 
+            console.log(`Cam${camId}: Reproduciendo SOLO esta cámara`);
+          } catch(e){ 
+            console.warn(`Error reproduciendo cam${camId}:`, e); 
+          } 
+        } else { 
+          video.pause(); 
+          console.log(`Cam${camId}: Pausado SOLO esta cámara`);
+        }
       };
       over.appendChild(btnPlay);
 
@@ -382,15 +396,16 @@
     // Actualizar estado cada 2 segundos
     setInterval(updateStreamStatus, 2000);
     
-    // Sistema de keep-alive para streams
-    setInterval(() => {
-      players.forEach(({video}, camId) => {
-        if (video.paused && video.readyState >= 2) {
-          console.log(`Cam${camId}: Stream pausado, reactivando...`);
-          video.play().catch(e => console.warn(`Error reactivando cam${camId}:`, e));
-        }
-      });
-    }, 10000); // Cada 10 segundos
+    // Sistema de keep-alive DESHABILITADO - solo manual
+    // Los streams se mantienen pausados hasta que se solicite manualmente
+    // setInterval(() => {
+    //   players.forEach(({video}, camId) => {
+    //     if (video.paused && video.readyState >= 2) {
+    //       console.log(`Cam${camId}: Stream pausado, reactivando...`);
+    //       video.play().catch(e => console.warn(`Error reactivando cam${camId}:`, e));
+    //     }
+    //   });
+    // }, 10000); // Cada 10 segundos
     
     // Limpieza al cerrar pestaña
     window.addEventListener('beforeunload', () => {
