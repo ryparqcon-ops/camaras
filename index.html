@@ -29,6 +29,7 @@
 </head>
 <body>
   <header>
+    
     <div><strong>Casa Austin • 15 cámaras</strong></div>
     <div class="controls">
       <button id="testConnection">🔍 Probar Conexión</button>
@@ -55,8 +56,8 @@
   </footer>
 
   <script>
-    // IDs: 102 → 1502 saltando de 100 en 100 (15 cámaras)
-    const camIds = Array.from({length: 15}, (_, i) => 102 + i * 100);
+    // IDs: 101 → 1501 saltando de 100 en 100 (15 cámaras)
+    const camIds = Array.from({length: 15}, (_, i) => 101 + i * 100);
 
     const makeUrl = id => `https://video.casaaustin.pe/api/stream.mp4?src=cam${id}`;
 
